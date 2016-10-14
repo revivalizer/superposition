@@ -87,6 +87,22 @@ void sp__reset_error(sp_error* Error)
 	Error->ErrorMessage = 0;
 }
 
+struct sp_node;
+struct sp_buffer;
+
+typedef struct sp_buffer*(*sp_node_update)(struct sp_node*);
+
+typedef struct {
+	int NumSamples;
+	float* Data;
+} sp_buffer;
+
+typedef struct {
+	sp_buffer* Buffer;
+	int        BufferRevision;
+	sp_node_update* Update;
+	void*           State;
+} sp_node;
 
 
 
@@ -113,6 +129,12 @@ typedef struct {
 	} Backend;
 } sp_system;
 
+// TODO
+// Subarena alloc
+// Node alloc with freelist
+// Input linked list item with free list
+// Temp buffer allocator
+// Update functions with input and so on wrapped, so passes input buffers, state and buffer - YEAH NOCE
 
 
 
