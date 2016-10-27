@@ -66,7 +66,7 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Message, WPARAM wParam, LPAR
 	return(DefWindowProc(WindowHandle, Message, wParam, lParam));
 }
 
-#define SuperpositionMemSize 100*1024
+#define SuperpositionMemSize 2*1024*1024
 char SuperpositionMem[SuperpositionMemSize];
 
 void* GiveMeMemory(int NumBytes)
