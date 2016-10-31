@@ -165,10 +165,11 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	void* SomeWav = LoadFileData("C:\\Users\\rb\\Downloads\\[99Sounds] Cinematic Sound Effects\\[99Sounds] Cinematic Sound Effects\\Loops\\Generdyn - INSTLoops - 01.wav");
 
-	int SomeWavSize = sp_unpacked_size(Superposition, SomeWav);
-	void* SomeWavUnpacked = GiveMeMemory(SomeWavSize);
-	sp_sample* SomeSample = sp_unpack(Superposition, SomeWav, SomeWavUnpacked);
-	sp_play(Superposition, SomeSample);
+	//int SomeWavSize = sp_unpacked_size(Superposition, SomeWav);
+	//void* SomeWavUnpacked = GiveMeMemory(SomeWavSize);
+	sp_sample SomeSample;// = sp_unpack(Superposition, SomeWav, SomeWavUnpacked);
+	sp_sample_create(Superposition, SomeWav, &SomeSample);
+	sp_play(Superposition, &SomeSample);
 
 	while (IsRunning)
 	{

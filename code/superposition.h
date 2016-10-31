@@ -24,11 +24,10 @@ publish, and distribute this file as you see fit.
 
 // TODO(revivalizer):
 // Stop using interleaved channels?
-// Don't unpack samples if possible
 // Clean up update func abstraction
 // Better struct typedef structure
 // Correctly end sounds
-// Click on loop
+// Click on loop?
 
 #ifndef SUPERPOSITION_HEADER_GUARD
 #define SUPERPOSITION_HEADER_GUARD
@@ -194,9 +193,47 @@ typedef struct {
 	DWORD               WritePos;
 } sp__directsound;
 
+typedef struct {
+	uint32_t ChunkID;
+	uint32_t ChunkSize;
+	uint32_t Format;
+} sp__wav_header;
+
+typedef struct {
+	uint32_t ChunkID;
+	uint32_t ChunkSize;
+} sp__wav_data_chunk;
+
+typedef struct {
+	uint32_t ChunkID;
+	uint32_t ChunkSize;
+	uint16_t AudioFormat;
+	uint16_t NumChannels;
+	uint32_t SampleRate;
+	uint32_t ByteRate;
+	uint16_t BlockAlign;
+	uint16_t BitsPerSample;
+} sp__wav_format_chunk;
+
+typedef struct {
+	sp__wav_header* Header;
+	sp__wav_format_chunk* Format;
+	sp__wav_data_chunk* Data;
+	uintptr_t SampleData;
+} sp__sample_wav;
+
+
+enum {
+	sp_sample_type_unknown = 0,
+	sp_sample_type_wav,
+};
+
 struct sp__sample {
+	int SampleType;
 	int NumFrames;
-	float* Samples;
+	union {
+		sp__sample_wav Wav;
+	} Sample;
 };
 
 typedef struct {
@@ -413,8 +450,20 @@ void sp_update_sample(sp_node* Node) {
 	{
 		if (Playback->CurrentFrame >= 0 && Playback->CurrentFrame < Playback->Sample->NumFrames)
 		{
-			Node->Buffer->Data[i*2 + 0] = Playback->Sample->Samples[Playback->CurrentFrame*2 + 0];
-			Node->Buffer->Data[i*2 + 1] = Playback->Sample->Samples[Playback->CurrentFrame*2 + 1];
+			// Stereo 24-bit
+			// TODO(revivalizer): Smells on next line
+			uint8_t* SourceSamples = (uint8_t*)(Playback->Sample->Sample.Wav.SampleData) + Playback->CurrentFrame*6;
+			float* DestSamples = Node->Buffer->Data + i*2;
+
+			for (int i=0; i<2; i++)
+			{
+				int Value = (SourceSamples[2] << 16) + (SourceSamples[1] << 8) + SourceSamples[0];
+
+				Value |= (Value & (1 << 23)) ? 0xFF000000 : 0;
+
+				*DestSamples++ = (float)Value / (float)(1 << 23);
+				SourceSamples += 3;
+			}
 		}
 		else
 		{
@@ -513,36 +562,7 @@ void sp__wav_set_error(sp_system* System, const char* ErrorMessage, int ErrorTyp
 	System->LastError.ErrorType = ErrorType;
 }
 
-typedef struct {
-	uint32_t ChunkID;
-	uint32_t ChunkSize;
-	uint32_t Format;
-} sp__wav_header;
-
-typedef struct {
-	uint32_t ChunkID;
-	uint32_t ChunkSize;
-} sp__wav_data_chunk;
-
-typedef struct {
-	uint32_t ChunkID;
-	uint32_t ChunkSize;
-	uint16_t AudioFormat;
-	uint16_t NumChannels;
-	uint32_t SampleRate;
-	uint32_t ByteRate;
-	uint16_t BlockAlign;
-	uint16_t BitsPerSample;
-} sp__wav_format_chunk;
-
-typedef struct {
-	sp__wav_header* Header;
-	sp__wav_format_chunk* Format;
-	sp__wav_data_chunk* Data;
-	uintptr_t SampleData;
-} sp__parsed_wav;
-
-int sp__wav_parse(uintptr_t Sample, sp__parsed_wav* Wav) {
+int sp__wav_parse(uintptr_t Sample, sp__sample_wav* Wav) {
 	memset(Wav, 0, sizeof(*Wav));
 
 	sp__wav_header* Header = (sp__wav_header*)Sample;
@@ -560,30 +580,23 @@ int sp__wav_parse(uintptr_t Sample, sp__parsed_wav* Wav) {
 
 	uintptr_t CurrentChunk = Sample + 12;
 
-	while (CurrentChunk < FileEnd)
-	{
+	while (CurrentChunk < FileEnd) {
 		sp__wav_format_chunk* Chunk = (sp__wav_format_chunk*)CurrentChunk;
-		if (Chunk->ChunkID == ' tmf')
-		{
+		if (Chunk->ChunkID == ' tmf') {
 			Wav->Format = Chunk;
 			break;
 		}
-
 		CurrentChunk += 8 + Chunk->ChunkSize;
 	}
 
-	if (Wav->Format != 0)
-	{
-		while (CurrentChunk < FileEnd)
-		{
+	if (Wav->Format != 0) {
+		while (CurrentChunk < FileEnd) {
 			sp__wav_data_chunk* Chunk = (sp__wav_data_chunk*)CurrentChunk;
-			if (Chunk->ChunkID == 'atad')
-			{
+			if (Chunk->ChunkID == 'atad') {
 				Wav->Data = Chunk;
 				Wav->SampleData = CurrentChunk + 8;
 				return 1;
 			}
-
 			CurrentChunk += 8 + Chunk->ChunkSize;
 		}
 	}
@@ -596,7 +609,7 @@ int sp__is_wav(void* Sample) {
 	return Wav->ChunkID == 'FFIR' && Wav->Format == 'EVAW';
 }
 
-int sp__is_supported_wav_format(sp__parsed_wav* Wav) {
+int sp__is_supported_wav_format(sp__sample_wav* Wav) {
 	if (Wav->Format->AudioFormat != WAVE_FORMAT_PCM)
 		return 0;
 	if (Wav->Format->NumChannels != 1 && Wav->Format->NumChannels != 2)
@@ -609,68 +622,21 @@ int sp__is_supported_wav_format(sp__parsed_wav* Wav) {
 	return 1;
 }
 
-int sp_unpacked_size(sp_system* System, void* Sample) {
+int sp_sample_create(sp_system* System, void* Sample, sp_sample* Dest) {
 	if (sp__is_wav(Sample))
 	{
-		sp__parsed_wav Wav;
-		if (!sp__wav_parse((uintptr_t)Sample, &Wav) || !sp__is_supported_wav_format(&Wav)) {
+		if (!sp__wav_parse((uintptr_t)Sample, &Dest->Sample.Wav) || !sp__is_supported_wav_format(&Dest->Sample.Wav)) {
 			sp__wav_set_error(System, "Superposition Unpack: Unsupported wav file format.", sp_unpack_unsupported_wav_format);
 			return 0;
 		}
 
-		int HeaderSize = sizeof(sp_sample);
-		HeaderSize = (HeaderSize + 15) & (~15);
+		Dest->NumFrames = Dest->Sample.Wav.Data->ChunkSize / Dest->Sample.Wav.Format->BlockAlign;
 
-		int NumSamples = Wav.Data->ChunkSize / Wav.Format->BlockAlign;
-
-		int NumBytes = HeaderSize + NumSamples*2*sizeof(float);
-		return NumBytes;
+		return 1;
 	}
 	else
 	{
-		sp__wav_set_error(System, "Superposition Unpack: Unrecognized file format.", sp_unpack_unrecognized_type);
-		return 0;
-	}
-}
-
-sp_sample* sp_unpack(sp_system* System, void* Sample, void* Dest) {
-	sp_sample* UnpackedSample = (sp_sample*)Dest;
-
-	if (sp__is_wav(Sample))
-	{
-		sp__parsed_wav Wav;
-		if (!sp__wav_parse((uintptr_t)Sample, &Wav) || !sp__is_supported_wav_format(&Wav)) {
-			sp__wav_set_error(System, "Superposition Unpack: Unsupported wav file format.", sp_unpack_unsupported_wav_format);
-			return 0;
-		}
-
-		int HeaderSize = sizeof(sp_sample);
-		HeaderSize = (HeaderSize + 15) & (~15);
-
-		UnpackedSample->NumFrames = Wav.Data->ChunkSize / Wav.Format->BlockAlign;
-		UnpackedSample->Samples = (float*)((uintptr_t)Dest + HeaderSize);
-
-		uint8_t* SourceSamples = (uint8_t*)Wav.SampleData;
-		float* DestSamples = UnpackedSample->Samples;
-
-		// TODO(revivalizer): This is assuming stereo 24-bit
-		for (int i=0; i<UnpackedSample->NumFrames*2; i++)
-		{
-			int Left = (SourceSamples[2] << 16) + (SourceSamples[1] << 8) + SourceSamples[0];
-
-			Left |= (Left & (1 << 23)) ? 0xFF000000 : 0;
-
-			DestSamples[0] = (float)Left / (float)(1 << 23);
-
-			SourceSamples += 3;
-			DestSamples += 1;
-		}
-
-		return UnpackedSample;
-	}
-	else
-	{
-		sp__wav_set_error(System, "Superposition Unpack: Unrecognized file format.", sp_unpack_unrecognized_type);
+		sp__wav_set_error(System, "Superposition Unpack: Unrecognized sample file format.", sp_unpack_unrecognized_type);
 		return 0;
 	}
 }
