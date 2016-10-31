@@ -443,38 +443,54 @@ void sp__node_update_recursive(sp_system* System, sp_node* Node, int NumFrames)
 	Node->UpdateFunc(Node);
 }
 
+int sp__min(int a, int b) { return a < b ? a : b; }
+
 void sp_update_sample(sp_node* Node) {
 	sp__state_sample_playback* Playback = (sp__state_sample_playback*)Node->State;
 
-	for (int i=0; i<Node->Buffer->NumFrames; i++)
-	{
-		if (Playback->CurrentFrame >= 0 && Playback->CurrentFrame < Playback->Sample->NumFrames)
+	int NumFramesRemaining = Node->Buffer->NumFrames;
+
+	int IsPlaying = 1;
+
+	float* Dest = Node->Buffer->Data;
+
+	while (NumFramesRemaining > 0) {
+		if (IsPlaying == 1)
 		{
+			int NumFramesRemainingInSample = Playback->Sample->NumFrames - Playback->CurrentFrame;
+
+			int NumFrames = sp__min(NumFramesRemaining, NumFramesRemainingInSample);
+			int NumSamples = NumFrames*SP__DIRECTSOUND_REPLAY_CHANNELS;
+
 			// Stereo 24-bit
-			// TODO(revivalizer): Smells on next line
-			uint8_t* SourceSamples = (uint8_t*)(Playback->Sample->Sample.Wav.SampleData) + Playback->CurrentFrame*6;
-			float* DestSamples = Node->Buffer->Data + i*2;
+			// TODO(revivalizer): Smells on next line. Blockalign, better struct structure.
+			uint8_t* Source = (uint8_t*)(Playback->Sample->Sample.Wav.SampleData) + Playback->CurrentFrame*6;
 
-			for (int i=0; i<2; i++)
+			for (int i=0; i<NumSamples; i++)
 			{
-				int Value = (SourceSamples[2] << 16) + (SourceSamples[1] << 8) + SourceSamples[0];
-
+				int Value = (Source[2] << 16) + (Source[1] << 8) + Source[0];
 				Value |= (Value & (1 << 23)) ? 0xFF000000 : 0;
 
-				*DestSamples++ = (float)Value / (float)(1 << 23);
-				SourceSamples += 3;
+				*Dest++ = (float)Value / (float)(1 << 23);
+				Source += 3;
 			}
+
+			NumFramesRemaining -= NumFrames;
+			Playback->CurrentFrame += NumFrames;
+
+			// TODO(revivalizer): Extend this with loop/stop functionality
+			if (Playback->CurrentFrame >= Playback->Sample->NumFrames)
+				Playback->CurrentFrame = 0;
 		}
 		else
 		{
-			Node->Buffer->Data[i*2 + 0] = 0.f;
-			Node->Buffer->Data[i*2 + 1] = 0.f;
+			int NumSamplesToClear = NumFramesRemaining*SP__DIRECTSOUND_REPLAY_CHANNELS;
+
+			for (int i=0; i<NumSamplesToClear; i++)
+				*Dest++ = 0.f;
+
+			return;
 		}
-
-		Playback->CurrentFrame++;
-
-		if (Playback->CurrentFrame >= Playback->Sample->NumFrames)
-			Playback->CurrentFrame = 0;
 	}
 }
 
