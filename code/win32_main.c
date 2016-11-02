@@ -160,7 +160,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	b32 IsRunning = 1;
 
-	sp_system* Superposition = sp_open(Win32.Window.Handle, (void*)SuperpositionMem, SuperpositionMemSize);
+	sp_system* Superposition = sp_open(Win32.Window.Handle, (void*)(SuperpositionMem+1), SuperpositionMemSize-1); // Align incorrectly on purpose
 	sp_update(Superposition, 1.f/60.f * 2.f);
 
 	void* SomeWav = LoadFileData("C:\\Users\\rb\\Downloads\\[99Sounds] Cinematic Sound Effects\\[99Sounds] Cinematic Sound Effects\\Loops\\Generdyn - INSTLoops - 01.wav");
