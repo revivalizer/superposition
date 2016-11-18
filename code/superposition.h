@@ -14,7 +14,12 @@ C99
 	include: stdint.h (intptr types)
 
 
-
+What low pain means:
+	Single header lib
+	C99 implementation
+	No allocations
+	Predictable performance
+	Extendable API
 
 This software is dual-licensed to the public domain and under the following
 license: you are granted a perpetual, irrevocable license to copy, modify,
@@ -566,11 +571,11 @@ sp_node* sp_make_node_sample_playback(sp_system* System, sp_sample* Sample) {
 	return Node;
 }
 
-int sp_play(sp_system* System, sp_sample* Sample) {
+sp_node* sp_play(sp_system* System, sp_sample* Sample) {
 	sp_node* Node = sp_make_node_sample_playback(System, Sample);
 	System->Root->Inputs[0] = Node; // TODO: HACK
 	System->Root->NumInputs = 1;
-	return 1;
+	return Node;
 }
 
 
